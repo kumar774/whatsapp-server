@@ -1,10 +1,17 @@
 import express from "express";
 import pkg from "whatsapp-web.js";
 import qrcode from "qrcode";
+import cors from "cors";
 
 const { Client, LocalAuth } = pkg;
 
 const app = express();
+
+app.use(cors({
+  origin: "*",   // allow all origins (for now)
+  methods: ["GET", "POST"],
+}));
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
