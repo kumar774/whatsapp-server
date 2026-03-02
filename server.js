@@ -8,13 +8,19 @@ const { Client, LocalAuth } = pkg;
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
 
 const PORT = process.env.PORT || 10000;
 
 let clients = new Set();
 let isReady = false;
 let latestQR = null;
+
+server.on("upgrade", (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
+  });
+});
 
 const waClient = new Client({
   authStrategy: new LocalAuth(),
