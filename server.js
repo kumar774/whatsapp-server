@@ -7,8 +7,24 @@ import qrcode from "qrcode";
 const { Client, LocalAuth } = pkg;
 
 const app = express();
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("WhatsApp Server Running ✅");
+});
+
 const server = http.createServer(app);
+
 const wss = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (request, socket, head) => {
+  console.log("Upgrade request received");
+
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    console.log("WebSocket upgraded");
+    wss.emit("connection", ws, request);
+  });
+});
 
 const PORT = process.env.PORT || 10000;
 
@@ -16,11 +32,7 @@ let clients = new Set();
 let isReady = false;
 let latestQR = null;
 
-server.on("upgrade", (request, socket, head) => {
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit("connection", ws, request);
-  });
-});
+console.log("Initializing WhatsApp client...");
 
 const waClient = new Client({
   authStrategy: new LocalAuth(),
@@ -55,6 +67,11 @@ waClient.on("auth_failure", (msg) => {
   console.error("Auth failure:", msg);
 });
 
+waClient.on("disconnected", (reason) => {
+  console.log("WhatsApp Disconnected:", reason);
+  isReady = false;
+});
+
 waClient.initialize();
 
 wss.on("connection", (ws) => {
@@ -70,41 +87,53 @@ wss.on("connection", (ws) => {
   }
 
   ws.on("message", async (message) => {
-    const data = JSON.parse(message);
+    console.log("Received:", message.toString());
 
-    if (data.type === "SEND_BULK") {
-      const numbers = data.numbers;
-      const msg = data.message;
+    try {
+      const data = JSON.parse(message);
 
-      let total = numbers.length;
-      let sent = 0;
-      let failed = 0;
+      if (data.type === "SEND_BULK") {
+        const numbers = data.numbers || [];
+        const msg = data.message || "";
 
-      for (let num of numbers) {
-        try {
-          await waClient.sendMessage(num + "@c.us", msg);
-          sent++;
-        } catch (err) {
-          failed++;
+        let total = numbers.length;
+        let sent = 0;
+        let failed = 0;
+
+        for (let num of numbers) {
+          try {
+            await waClient.sendMessage(num + "@c.us", msg);
+            sent++;
+          } catch (err) {
+            console.error("Send error:", err);
+            failed++;
+          }
+
+          broadcast({
+            type: "PROGRESS",
+            total,
+            sent,
+            failed,
+            percent: Math.floor((sent / total) * 100)
+          });
+
+          await new Promise((res) => setTimeout(res, 3000));
         }
 
-        broadcast({
-          type: "PROGRESS",
-          total,
-          sent,
-          failed,
-          percent: Math.floor((sent / total) * 100)
-        });
-
-        await new Promise((res) => setTimeout(res, 3000));
+        broadcast({ type: "COMPLETED" });
       }
-
-      broadcast({ type: "COMPLETED" });
+    } catch (err) {
+      console.error("Message parse error:", err);
     }
   });
 
   ws.on("close", () => {
+    console.log("WebSocket closed");
     clients.delete(ws);
+  });
+
+  ws.on("error", (err) => {
+    console.error("WebSocket error:", err);
   });
 });
 
